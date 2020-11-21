@@ -1,0 +1,5 @@
+# OBJECT
+*.o
+
+# OS GENERATED
+.DS_Store

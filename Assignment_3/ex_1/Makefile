@@ -22,7 +22,7 @@ NVFLAGS:=-O3 -arch=${ARCH}
 all: ${EXEC}
 
 ${EXEC}: ${OBJ}
-	${NVCC} ${NVFLAGS} -o $@ -c $<
+	${NVCC} ${NVFLAGS} -o $@ $<
 
 %.o: %.cu
 	${NVCC} ${NVFLAGS} -o $@ -c $<

@@ -1,5 +1,8 @@
 # OBJECT
 *.o
 
+# Compiled programs
+*.out
+
 # OS GENERATED
 .DS_Store

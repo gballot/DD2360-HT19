@@ -1,293 +1,179 @@
-#include <cuda.h>
-#include <stdio.h>
-#include <curand.h>
-#include <sys/time.h>
-#include <errno.h>
-#include <unistd.h>
-#include <cublas_v2.h>
+#include <stdio.h>			// For use of the printf function
+#include <sys/time.h>		// For use of gettimeofday function
 
-#ifndef TILE_SIZE
-#define TILE_SIZE 16
-#endif
+#define NUM_TIMESTEPS 10000
+#define ABS(a) ((a) < 0 ? -(a) : (a))
+#define DT 1
+# define BLOCK_SIZE 256	// Threads PER block
 
-#define THRESHOLD 1e-3
+int BATCH_SIZE = 1000;		// Number of particles to operate on at a time
+int NUM_STREAMS = 1;		// Number of CUDA Streams to use
+int NUM_PARTICLES = 10000;	// # of particles to simulate, equivalent to # of threads
 
-/* CUDA layout */
-dim3 grid(1);
-dim3 block(TILE_SIZE, TILE_SIZE);
+// Gravity field
+float3 field = (float3) {0.f, 0.f, 9.8f};
 
-/* from cuda samples */
-void checkGpuError(cudaError_t result, char const *const func, const char *const file, int const line) {
-        if(result!=cudaSuccess) { \
-                fprintf(stderr, "Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(result));
-                exit(1);
-        }
+// Structure for the particles
+typedef struct {
+  float3 position;
+  float3 velocity;
+} Particle;
+
+/**
+ * Can use multiple qualifiers to specify where a function will run in order
+ * to reuse code that needs to be run on both host and device.
+ * Change the position of the given particle based on its velocity using the
+ * formula `new_position.coord = old_position.coord + velocity.coord` where
+ * coord is x, y and z.
+ *
+ * @param particle	Particle for which a position update will be performed
+ */
+__host__ __device__ void updatePosition(Particle *particle) {
+  particle->position.x = particle->position.x + particle->velocity.x * DT;
+  particle->position.y = particle->position.y + particle->velocity.y * DT;
+  particle->position.z = particle->position.z + particle->velocity.z * DT;
 }
 
-// This will output the proper CUDA error strings in the event
-// that a CUDA host call returns an error
-#define checkCudaErrors(val) checkGpuError((val), #val, __FILE__, __LINE__)
+/**
+ * Update the velocity of the given particle according to a field that specifies
+ * the rate of change for each dimension of the particle's velocity
+ *
+ * @param particle	Particle for which a velocity update will be performed
+ * @param field		Rate of change for each dimension (x, y, z) of a velocity
+ */
+__host__ __device__ void updateVelocity(Particle *particle, float3 field) {
+  particle->velocity.x = particle->velocity.x + field.x * DT;
+  particle->velocity.y = particle->velocity.y + field.y * DT;
+  particle->velocity.z = particle->velocity.z + field.z * DT;
 
-/* https://gist.github.com/Tener/803377 */
-#define CURAND_CALL(x) { \
-	do { \
-		if((x) != CURAND_STATUS_SUCCESS) { \
-			printf("Error at %s:%d\n",__FILE__,__LINE__);            \
-			exit(1); \
-		} \
-	} while(0); \
 }
 
-/* time diff in ms */
-double elapsed(struct timeval t0, struct timeval t1)
-{
-	return (double)(t1.tv_sec - t0.tv_sec) * 1000.0L + (double)(t1.tv_usec - t0.tv_usec) / 1000.0L;
+/**
+ * Device implementation for the simulation of moving particles
+ *
+ * @param particles		List of particles for which to simulate movement
+ * @param field			Values specifying the rate of change for a particle's
+ *						velocity in each dimension
+ * @param num_particles	# of particles, used to determine how many threads to
+ *						give work if too many threads are initiated
+ */
+__global__ void simulateParticlesKernel(Particle *particles, float3 field,
+    int num_particles) {
+
+	// Unique ID of the current thread to determine what work to compute
+	int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+
+	// This thread has no work to do, exit
+	if (threadId > num_particles) return;
+
+  // Get the right particle
+  Particle *particle = particles + threadId;
+
+  // Update velocity first
+  updateVelocity(particle, field);
+
+  // Update position
+  updatePosition(particle);
 }
 
-/* compare matrix with abs difference */
-void compare_matrix(float *matrix_a, float *matrix_b, long size, double threshold)
-{
-	for (long i = 0; i < size*size; i++) {
-		if (fabs((double)matrix_a[i] - (double)matrix_b[i]) > threshold) {
-			fprintf(stderr, "Compare matrix failed: %f vs %f\n", matrix_a[i], matrix_b[i]);
-			exit(1);
-		}
+/**
+ * Fill the given array with n random floats.
+ *
+ * @param array	Array to populate with floats.
+ * @param n		Number of floats to populate the array with.
+ */
+void populateParticleArray(Particle *particles, int n) {
+  Particle particle;
+
+	for (int index = 0; index < n; index++) {
+		// Generate random particles
+    particle.position.x = 10.0 * ((float) rand() / (float) RAND_MAX);
+    particle.position.y = 10.0 * ((float) rand() / (float) RAND_MAX);
+    particle.position.z = 10.0 * ((float) rand() / (float) RAND_MAX);
+    particle.velocity.x = 1.0 * ((float) rand() / (float) RAND_MAX);
+    particle.velocity.y = 1.0 * ((float) rand() / (float) RAND_MAX);
+    particle.velocity.z = 1.0 * ((float) rand() / (float) RAND_MAX);
+
+		particles[index] = particle;
 	}
 }
 
-/* init matrix with curand */
-void init_matrix(float *matrix, long size, unsigned long long seed)
-{
-	float *d_matrix = NULL;
-	curandGenerator_t gen;
+// Entry point into the program, run each implementation of simulation and compare
+// the results
+int main(int argc, char **argv) {
 
-	checkCudaErrors(cudaMalloc(&d_matrix, sizeof(float)*size*size));
+	if (argc != 4) {
+    	printf("Usage: %s <# particles> <# streams> <batch size>\n", argv[0]);
+    	exit(-1);
+	} else {
+    	NUM_PARTICLES = atoi(argv[1]);
+		NUM_STREAMS = atoi(argv[2]);
+		BATCH_SIZE = atoi(argv[3]);
+	}
 
-	CURAND_CALL(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
-	CURAND_CALL(curandSetPseudoRandomGeneratorSeed(gen, seed));
-	CURAND_CALL(curandGenerateUniform(gen, d_matrix, size*size));
+	int numBatches = NUM_PARTICLES / BATCH_SIZE;
 
-	checkCudaErrors(cudaMemcpy(matrix, d_matrix, sizeof(float)*size*size, cudaMemcpyDeviceToHost));
+	// Divide particles into batches
+	Particle **hostParticles = (Particle **) malloc(numBatches * sizeof(Particle *));
+	Particle **devParticles = (Particle **) malloc(numBatches* sizeof(Particle *));
+	for (int batch = 0; batch < numBatches; batch++) {
+		// Allocate pinned (locked) memory on the host
+		cudaMallocHost(&hostParticles[batch], NUM_PARTICLES * sizeof(Particle));
 
-	checkCudaErrors(cudaFree(d_matrix));
-	CURAND_CALL(curandDestroyGenerator(gen));
-}
+		// Allocate memory on the device
+		cudaMalloc(&devParticles[batch], NUM_PARTICLES * sizeof(Particle));
+	}
 
-/* C = AB on CPU with re-ordered loop */
-void cpu_sgemm(float *C, float *A, float *B, long size)
-{
-	struct timeval t0, t1;
+	// Fill hostParticles arrays with random floats
+	populateParticleArray(hostParticles, NUM_PARTICLES);
 
-	gettimeofday(&t0, NULL);
+	// Create streams
+	cudaStream_t *streams = (cudaStream_t *) malloc(NUM_STREAMS * sizeof(cudaStream_t));
 
-	for (long i = 0; i < size; i++) {
-		for (long k = 0; k < size; k++) {
-			for (long j = 0; j < size; j++) {
-				C[i * size + j] += A[i * size + k] * B[k * size + j];
+	// After each timestep, copy particle results back to the CPU
+
+	int batchIndex = 0;
+	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
+		cudaStreamCreate(&streams[streamIndex]);
+
+		for (int timestep = 0; timestep < NUM_TIMESTEPS; timestep++) {
+			for (int batch = 0; batch < numBatches; batch += NUM_STREAMS) {
+				batchIndex = batch + streamIndex;
+
+				// Copy hostParticles onto the GPU
+				cudaMemcpyAsync(devParticles[batchIndex], hostParticles[batchIndex],
+					NUM_PARTICLES * sizeof(Particle), cudaMemcpyHostToDevice,
+					streams[streamIndex]);
+
+				// Round-up to the nearest multiple of BLOCK_SIZE that can hold at
+				// least NUM_PARTICLES threads
+				simulateParticlesKernel <<<
+					(NUM_PARTICLES + BLOCK_SIZE - 1) / BLOCK_SIZE,
+					BLOCK_SIZE, 0, streams[streamIndex]>>> (
+					devParticles[batchIndex], field, NUM_PARTICLES);
+				
+				// Copy the result of the simulation on the device back to
+				// the host into hostParticles
+				cudaMemcpyAsync(hostParticles[batchIndex], devParticles[batchIndex],
+					NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost,
+					streams[streamIndex]);
 			}
 		}
 	}
 
-	gettimeofday(&t1, NULL);
-
-	printf("CPU matmul:\t\t\t%f ms\n", elapsed(t0, t1));
-}
-
-/* matmul kernel with global memory */
-__global__
-void naive_sgemm_kernel(float *C, float *A, float *B, long size)
-{
-	const long i = blockIdx.x * blockDim.x + threadIdx.x;
-	const long j = blockIdx.y * blockDim.y + threadIdx.y;
-	float val = 0.0;
-
-	if (i >= size || j >= size)
-		return;
-
-	for (long k = 0; k < size; k++) {
-		val += A[i * size + k] * B[k * size + j];
+	// Synchronize and free the streams
+	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
+		cudaStreamSynchonize(streams[streamIndex]);
+		cudaStreamDestroy(streams[streamIndex]);
 	}
 
-	C[i * size + j] += val;
-}
-
-/* matmul with global memory */
-void naive_sgemm(float *C, float *A, float *B, long size)
-{
-	struct timeval t0, t1;
-	gettimeofday(&t0, NULL);
-	naive_sgemm_kernel<<<grid, block>>>(C, A, B, size);
-	checkCudaErrors(cudaPeekAtLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
-	gettimeofday(&t1, NULL);
-
-	printf("GPU matmul (global memory):\t%f ms\n", elapsed(t0, t1));
-}
-
-/* matmul kernel with shared memory */
-__global__
-void shared_sgemm_kernel(float *C, float *A, float *B, long size)
-{
-	const long col = blockIdx.x * blockDim.x + threadIdx.x;
-	const long row = blockIdx.y * blockDim.y + threadIdx.y;
-	float val = 0.0;
-
-	/* TODO declare shared memory with size TILE_SIZE x TILE_SIZE */
-
-	if (col < size && row < size) {
-		const long local_col = blockIdx.x * TILE_SIZE + threadIdx.x;
-		const long local_row = blockIdx.y * TILE_SIZE + threadIdx.y;
-
-		for (long m = 0; m < size / TILE_SIZE; ++m) {
-			tile_A[threadIdx.y][threadIdx.x] = A[local_row * size + (m * TILE_SIZE + threadIdx.x)];
-			tile_B[threadIdx.y][threadIdx.x] = B[(m * TILE_SIZE + threadIdx.y) * size + local_col];
-			__syncthreads();
-	
-			/* TODO introduce a pragma directive that can potentially improve performance here */
-			for (long k = 0; k < TILE_SIZE; ++k) {
-				/* TODO Perform multiplication here */
-			}
-			__syncthreads();
-		}
-
-		C[local_row * size + local_col] = val;
-	}
-}
-
-/* matmul with shared memory */
-void shared_sgemm(float *C, float *A, float *B, long size)
-{
-	struct timeval t0, t1;
-	gettimeofday(&t0, NULL);
-	shared_sgemm_kernel<<<grid, block>>>(C, A, B, size);
-	checkCudaErrors(cudaPeekAtLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
-	gettimeofday(&t1, NULL);
-
-	printf("GPU matmul (shared memory):\t%f ms\n", elapsed(t0, t1));
-}
-
-/* cuBLAS */
-void cublas_sgemm(float *C, float *A, float *B, long size)
-{
-	struct timeval t0, t1;
-	float alpha = 1.0;
-	float beta = 0.0;
-
-	cublasHandle_t handle;
-	cublasCreate(&handle);
-
-	gettimeofday(&t0, NULL);
-	/* TODO fill in the blanks, do C = BA instead of C = AB */
-	cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, , , , , , , , , , , );
-	checkCudaErrors(cudaDeviceSynchronize());
-	gettimeofday(&t1, NULL);
-	cublasDestroy(handle);
-
-	printf("GPU cuBLAS matmul:\t\t%f ms\n", elapsed(t0, t1));
-}
-
-void print_usage(char *program)
-{
-	fprintf(stderr, "Usage: %s [-s size] [-v to verify with CPU sgemm]\n", program);
-}
-
-int main(int argc, char *argv[])
-{
-	int opt;
-	long size = 64;
-	bool verify = false;
-
-	while ((opt = getopt(argc, argv, "s:v")) != -1) {
-		switch (opt) {
-			case 's':
-				size = atol(optarg);
-				if (size % TILE_SIZE != 0) {
-					fprintf(stderr, "Error: Matrix size must be a multiple of tile size %d.\n", TILE_SIZE);
-					exit(1);
-				}
-				break;
-			case 'v':
-				verify = true;
-				printf("Matrix size: %ldx%ld\n", size, size);
-				break;
-			default:
-				print_usage(argv[0]);
-				exit(1);
-		}
+	// Free the allocated memory!!!
+	for (int batch = 0; batch < numBatches; batch++) {
+		cudaFreeHost(hostParticles[batch]);
+		cudaFree(devParticles[batch]);
 	}
 
-	grid = dim3(((size + (TILE_SIZE - 1)) / TILE_SIZE), ((size + (TILE_SIZE - 1)) / TILE_SIZE));
-
-	printf("Matrix size: %ldx%ld\n", size, size);
-	printf("Grid size: %ux%u\n", grid.x, grid.y);
-	printf("Tile size: %ux%u\n", TILE_SIZE, TILE_SIZE);
-	printf("Run CPU sgemm: %d\n\n", verify);
-
-	float *A = (float*)malloc(sizeof(float)*size*size);
-	float *B = (float*)malloc(sizeof(float)*size*size);
-	float *C_result = (float*)malloc(sizeof(float)*size*size);
-	float *C_truth = (float*)malloc(sizeof(float)*size*size);
-
-	float *d_A = NULL; 
-	float *d_B = NULL; 
-	float *d_C = NULL;
-
-	if (A == NULL || B == NULL || C_truth == NULL || C_result == NULL) {
-		fprintf(stderr, "Error: %s\n", strerror(errno));
-		exit(1);
-	}
-
-	/* initialize A and B */
-	init_matrix(A, size, 1);
-	init_matrix(B, size, 5);
-	memset(C_truth, 0, sizeof(float)*size*size);
-
-	/* allocate A and B on GPU */
-	checkCudaErrors(cudaMalloc(&d_A, sizeof(float)*size*size));
-	checkCudaErrors(cudaMalloc(&d_B, sizeof(float)*size*size));
-	checkCudaErrors(cudaMalloc(&d_C, sizeof(float)*size*size));
-
-	/* copy A and B to GPU */
-	checkCudaErrors(cudaMemcpy(d_A, A, sizeof(float)*size*size, cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_B, B, sizeof(float)*size*size, cudaMemcpyHostToDevice));
-
-	/* host gemm */
-	if (verify) {
-		cpu_sgemm(C_truth, A, B, size);
-	}
-
-	/* set C on GPU and run cublas */
-	checkCudaErrors(cudaMemset(d_C, 0, sizeof(float)*size*size));
-	cublas_sgemm(d_C, d_A, d_B, size);
-	if (verify) {
-		checkCudaErrors(cudaMemcpy(C_result, d_C, sizeof(float)*size*size, cudaMemcpyDeviceToHost));
-		compare_matrix(C_result, C_truth, size, THRESHOLD);
-	}
-	else {
-		checkCudaErrors(cudaMemcpy(C_truth, d_C, sizeof(float)*size*size, cudaMemcpyDeviceToHost));
-	}
-
-	/* run naive gpu gemm */
-	checkCudaErrors(cudaMemset(d_C, 0, sizeof(float)*size*size));
-	naive_sgemm(d_C, d_A, d_B, size);
-	checkCudaErrors(cudaMemcpy(C_result, d_C, sizeof(float)*size*size, cudaMemcpyDeviceToHost));
-	compare_matrix(C_result, C_truth, size, THRESHOLD);
-
-	/* run shared */
-	checkCudaErrors(cudaMemset(d_C, 0, sizeof(float)*size*size));
-	shared_sgemm(d_C, d_A, d_B, size);
-	checkCudaErrors(cudaMemcpy(C_result, d_C, sizeof(float)*size*size, cudaMemcpyDeviceToHost));
-	compare_matrix(C_result, C_truth, size, THRESHOLD);
-
-	/* free */
-	checkCudaErrors(cudaFree(d_A));
-	checkCudaErrors(cudaFree(d_B));
-	checkCudaErrors(cudaFree(d_C));
-	free(A);
-	free(B);
-	free(C_truth);
-	free(C_result);
-
+	free(hostParticles);
+	free(devParticles);
 	return 0;
 }

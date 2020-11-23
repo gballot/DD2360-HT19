@@ -1,7 +1,7 @@
 #include <stdio.h>			// For use of the printf function
 #include <sys/time.h>		// For use of gettimeofday function
 
-#define NUM_TIMESTEPS 10000
+#define NUM_TIMESTEPS 1000
 #define ABS(a) ((a) < 0 ? -(a) : (a))
 #define DT 1
 
@@ -99,8 +99,8 @@ void populateParticleArray(Particle *particles, int n) {
 // Entry point into the program, run each implementation of simulation and compare
 // the results
 int main(int argc, char **argv) {
-  char *file_path;
-  FILE *out_file = 0;
+	NUM_PARTICLES = 10000;
+	BLOCK_SIZE = 256;
 
   if (argc != 1 && argc != 2) {
     printf("Usage: %s <num_particles>\n", argv[0]);
@@ -121,13 +121,12 @@ int main(int argc, char **argv) {
 		// Round-up to the nearest multiple of BLOCK_SIZE that can hold at least
 		// NUM_PARTICLES threads
 		simulateParticlesKernel <<<(NUM_PARTICLES + BLOCK_SIZE - 1) / BLOCK_SIZE,
-			BLOCK_SIZE>>> (particles, field, NUM_PARTICLES, NUM_TIMESTEPS);
+			BLOCK_SIZE>>> (particles, field, NUM_PARTICLES);
 		
 		// Wait until all the threads on the GPU have finished before continuing
 		cudaDeviceSynchronize();
 	}
 
-	cudaFree(hostParticles);
-	cudaFree(devParticles);
+	cudaFree(particles);
 	return 0;
 }

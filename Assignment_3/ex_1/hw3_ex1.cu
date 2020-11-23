@@ -6,6 +6,7 @@
 
 #define BLOCK_SIZE  16
 #define HEADER_SIZE 138
+#define BLOCK_SIZE_SH 18
 
 typedef unsigned char BYTE;
 
@@ -274,15 +275,19 @@ __global__ void gpu_gaussian(int width, int height, float *image,
 
   int index_x = blockIdx.x * blockDim.x + threadIdx.x;
   int index_y = blockIdx.y * blockDim.y + threadIdx.y;
+  int offset_sh = threadIdx.y * BLOCK_SIZE_SH + threadIdx.x;
 
-  if (index_x < (width - 2) && index_y < (height - 2))
-  {
-    int offset_t = index_y * width + index_x;
-    int offset   = (index_y + 1) * width + (index_x + 1);
+  if (index_x >= (width - 2) || index_y >=(height - 2)) return;
 
-    image_out[offset] = gpu_applyFilter(&image[offset_t],
-        width, gaussian, 3);
-  }
+  int offset_t = index_y * width + index_x;
+  int offset   = (index_y + 1) * width + (index_x + 1);
+
+  __shared__ float sh_block[BLOCK_SIZE_SH * BLOCK_SIZE_SH];
+  sh_block[offset_sh] = image[offset_t];
+  __syncthreads();
+
+  image_out[offset] = gpu_applyFilter(&sh_block[offset_sh],
+      BLOCK_SIZE_SH, gaussian, 3);
 }
 
 /**
@@ -320,10 +325,6 @@ void cpu_sobel(int width, int height, float *image, float *image_out)
 __global__ void gpu_sobel(int width, int height, float *image,
     float *image_out)
 {
-  ////////////////
-  // TO-DO #6.1 /////////////////////////////////////
-  // Implement the GPU version of the Sobel filter //
-  ///////////////////////////////////////////////////
   float sobel_x[9] = { 1.0f,  0.0f, -1.0f,
     2.0f,  0.0f, -2.0f,
     1.0f,  0.0f, -1.0f };
@@ -333,19 +334,36 @@ __global__ void gpu_sobel(int width, int height, float *image,
 
   int index_x = blockIdx.x * blockDim.x + threadIdx.x;
   int index_y = blockIdx.y * blockDim.y + threadIdx.y;
+  int offset_sh = threadIdx.y * BLOCK_SIZE_SH + threadIdx.x;
 
-  if (index_x < (width - 2) && index_y < (height - 2))
-  {
-    int offset_t = index_y * width + index_x;
-    int offset   = (index_y + 1) * width + (index_x + 1);
+  if (index_x >= (width - 2) || index_y >=(height - 2)) return;
 
-    float gx = gpu_applyFilter(&image[offset_t], width, sobel_x, 3);
-    float gy = gpu_applyFilter(&image[offset_t], width, sobel_y, 3);
+  int offset_t = index_y * width + index_x;
+  int offset   = (index_y + 1) * width + (index_x + 1);
 
-    // Note: The output can be negative or exceed the max. color value
-    // of 255. We compensate this afterwards while storing the file.
-    image_out[offset] = sqrtf(gx * gx + gy * gy);
-  }
+  __shared__ float sh_block[BLOCK_SIZE_SH * BLOCK_SIZE_SH];
+  sh_block[offset_sh] = image[offset_t];
+
+  // Copy block boundaries for convolution.
+  if (threadIdx.x < 2)
+    sh_block[offset_sh + BLOCK_SIZE] = image[offset_t + BLOCK_SIZE];
+  if (threadIdx.y < 2)
+    sh_block[offset_sh + BLOCK_SIZE * BLOCK_SIZE_SH]
+      = image[offset_t + BLOCK_SIZE * width];
+  if ((threadIdx.x < 2) && (threadIdx.y < 2))
+    sh_block[offset_sh + BLOCK_SIZE * (BLOCK_SIZE_SH + 1)]
+      = image[offset_t + BLOCK_SIZE * (width + 1)];
+
+  __syncthreads();
+
+  float gx = gpu_applyFilter(&sh_block[offset_sh], BLOCK_SIZE_SH,
+      sobel_x, 3);
+  float gy = gpu_applyFilter(&sh_block[offset_sh], BLOCK_SIZE_SH,
+      sobel_y, 3);
+
+  // Note: The output can be negative or exceed the max. color value
+  // of 255. We compensate this afterwards while storing the file.
+  image_out[offset] = sqrtf(gx * gx + gy * gy);
 }
 
 int main(int argc, char **argv)
@@ -392,7 +410,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    cpu_grayscale(bitmap.width, bitmap.height, bitmap.data, image_out[0]);
+    //cpu_grayscale(bitmap.width, bitmap.height, bitmap.data, image_out[0]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);
@@ -417,7 +435,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    cpu_gaussian(bitmap.width, bitmap.height, image_out[0], image_out[1]);
+    //cpu_gaussian(bitmap.width, bitmap.height, image_out[0], image_out[1]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);
@@ -442,7 +460,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    cpu_sobel(bitmap.width, bitmap.height, image_out[1], image_out[0]);
+    //cpu_sobel(bitmap.width, bitmap.height, image_out[1], image_out[0]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);

@@ -52,6 +52,6 @@ res3: ${RES}
 	display images/hw3_result_3_comp.jpg
 
 clean:
-	${RM} *.o ${EXEC}
+	${RM} *.o ${EXEC} ${RES} images/hw3_result_3_comp.jpg images/hw3_result_2_comp.jpg
 
 .PHONY: all clean alloc run tags res1 res2 res3

@@ -1,7 +1,7 @@
 #include <stdio.h>			// For use of the printf function
 #include <sys/time.h>		// For use of gettimeofday function
 
-#define NUM_TIMESTEPS 10000
+#define NUM_TIMESTEPS 1000
 #define ABS(a) ((a) < 0 ? -(a) : (a))
 #define DT 1
 # define BLOCK_SIZE 256	// Threads PER block
@@ -117,10 +117,10 @@ int main(int argc, char **argv) {
 	Particle *hostParticles, *devParticles;
 	
 	// Allocate pinned (locked) memory on the host
-	cudaMallocHost(&hostParticles[batch], NUM_PARTICLES * sizeof(Particle));
+	cudaMallocHost(&hostParticles, NUM_PARTICLES * sizeof(Particle));
 
 	// Allocate memory on the device
-	cudaMalloc(&devParticles[batch], NUM_PARTICLES * sizeof(Particle));
+	cudaMalloc(&devParticles, NUM_PARTICLES * sizeof(Particle));
 
 	// Fill hostParticles arrays with random floats
 	populateParticleArray(hostParticles, NUM_PARTICLES);
@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
 	cudaStream_t *streams = (cudaStream_t *) malloc(NUM_STREAMS * sizeof(cudaStream_t));
 
 	// After each timestep, copy particle results back to the CPU
-	int memoryLocation = 0;
+	int offset = 0;
 	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
 		cudaStreamCreate(&streams[streamIndex]);
 
@@ -138,21 +138,21 @@ int main(int argc, char **argv) {
 				offset = (batch + streamIndex) * BATCH_SIZE;
 
 				// Copy hostParticles onto the GPU
-				cudaMemcpyAsync(devParticles + offset, hostParticle + offset,
-					NUM_PARTICLES * sizeof(Particle), cudaMemcpyHostToDevice,
+				cudaMemcpyAsync(devParticles + offset, hostParticles + offset,
+					BATCH_SIZE * sizeof(Particle), cudaMemcpyHostToDevice,
 					streams[streamIndex]);
 
 				// Round-up to the nearest multiple of BLOCK_SIZE that can hold at
 				// least NUM_PARTICLES threads
 				simulateParticlesKernel <<<
-					(NUM_PARTICLES + BLOCK_SIZE - 1) / BLOCK_SIZE,
+					(BATCH_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE,
 					BLOCK_SIZE, 0, streams[streamIndex]>>> (
 					devParticles + offset, field, NUM_PARTICLES);
 				
 				// Copy the result of the simulation on the device back to
 				// the host into hostParticles
 				cudaMemcpyAsync(hostParticles + offset, devParticles + offset,
-					NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost,
+					BATCH_SIZE * sizeof(Particle), cudaMemcpyDeviceToHost,
 					streams[streamIndex]);
 			}
 		}

@@ -114,15 +114,13 @@ int main(int argc, char **argv) {
 	int numBatches = NUM_PARTICLES / BATCH_SIZE;
 
 	// Divide particles into batches
-	Particle **hostParticles = (Particle **) malloc(numBatches * sizeof(Particle *));
-	Particle **devParticles = (Particle **) malloc(numBatches* sizeof(Particle *));
-	for (int batch = 0; batch < numBatches; batch++) {
-		// Allocate pinned (locked) memory on the host
-		cudaMallocHost(&hostParticles[batch], NUM_PARTICLES * sizeof(Particle));
+	Particle *hostParticles, *devParticles;
+	
+	// Allocate pinned (locked) memory on the host
+	cudaMallocHost(&hostParticles[batch], NUM_PARTICLES * sizeof(Particle));
 
-		// Allocate memory on the device
-		cudaMalloc(&devParticles[batch], NUM_PARTICLES * sizeof(Particle));
-	}
+	// Allocate memory on the device
+	cudaMalloc(&devParticles[batch], NUM_PARTICLES * sizeof(Particle));
 
 	// Fill hostParticles arrays with random floats
 	populateParticleArray(hostParticles, NUM_PARTICLES);
@@ -131,17 +129,16 @@ int main(int argc, char **argv) {
 	cudaStream_t *streams = (cudaStream_t *) malloc(NUM_STREAMS * sizeof(cudaStream_t));
 
 	// After each timestep, copy particle results back to the CPU
-
-	int batchIndex = 0;
+	int memoryLocation = 0;
 	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
 		cudaStreamCreate(&streams[streamIndex]);
 
 		for (int timestep = 0; timestep < NUM_TIMESTEPS; timestep++) {
 			for (int batch = 0; batch < numBatches; batch += NUM_STREAMS) {
-				batchIndex = batch + streamIndex;
+				offset = (batch + streamIndex) * BATCH_SIZE;
 
 				// Copy hostParticles onto the GPU
-				cudaMemcpyAsync(devParticles[batchIndex], hostParticles[batchIndex],
+				cudaMemcpyAsync(devParticles + offset, hostParticle + offset,
 					NUM_PARTICLES * sizeof(Particle), cudaMemcpyHostToDevice,
 					streams[streamIndex]);
 
@@ -150,11 +147,11 @@ int main(int argc, char **argv) {
 				simulateParticlesKernel <<<
 					(NUM_PARTICLES + BLOCK_SIZE - 1) / BLOCK_SIZE,
 					BLOCK_SIZE, 0, streams[streamIndex]>>> (
-					devParticles[batchIndex], field, NUM_PARTICLES);
+					devParticles + offset, field, NUM_PARTICLES);
 				
 				// Copy the result of the simulation on the device back to
 				// the host into hostParticles
-				cudaMemcpyAsync(hostParticles[batchIndex], devParticles[batchIndex],
+				cudaMemcpyAsync(hostParticles + offset, devParticles + offset,
 					NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost,
 					streams[streamIndex]);
 			}
@@ -163,17 +160,12 @@ int main(int argc, char **argv) {
 
 	// Synchronize and free the streams
 	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
-		cudaStreamSynchonize(streams[streamIndex]);
+		cudaStreamSynchronize(streams[streamIndex]);
 		cudaStreamDestroy(streams[streamIndex]);
 	}
 
 	// Free the allocated memory!!!
-	for (int batch = 0; batch < numBatches; batch++) {
-		cudaFreeHost(hostParticles[batch]);
-		cudaFree(devParticles[batch]);
-	}
-
-	free(hostParticles);
-	free(devParticles);
+	cudaFreeHost(hostParticles);
+	cudaFree(devParticles);
 	return 0;
 }

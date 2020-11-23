@@ -176,8 +176,10 @@ void cpu_grayscale(int width, int height, float *image, float *image_out)
  */
 __global__ void gpu_grayscale(int width, int height, float *image, float *image_out)
 {
-  int h = blockIdx.x * blockDim.x + threadIdx.x;
-  int w = blockIdx.y * blockDim.y + threadIdx.y;
+  int w = blockIdx.x * blockDim.x + threadIdx.x;
+  int h = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (h >= height || w >= width) return; 
 
   int offset_out = h * width;      // 1 color per pixel
   int offset     = offset_out * 3; // 3 colors per pixel
@@ -222,8 +224,20 @@ __device__ float gpu_applyFilter(float *image, int stride, float *matrix, int fi
     //                                                          //
     // Does it make sense to have a separate gpu_applyFilter()? //
     //////////////////////////////////////////////////////////////
+    float pixel = 0.0f;
     
-    return 0.0f;
+    for (int h = 0; h < filter_dim; h++)
+    {
+        int offset        = h * stride;
+        int offset_kernel = h * filter_dim;
+        
+        for (int w = 0; w < filter_dim; w++)
+        {
+            pixel += image[offset + w] * matrix[offset_kernel + w];
+        }
+    }
+    
+    return pixel;
 }
 
 /**
@@ -371,7 +385,8 @@ int main(int argc, char **argv)
         elapsed[1] = get_elapsed(t[0], t[1]);
         
         // Store the result image in grayscale
-        store_result(1, elapsed[0], elapsed[1], bitmap.width, bitmap.height, image_out[0]);
+        store_result(1, elapsed[0], elapsed[1], bitmap.width, bitmap.height,
+            image_out[0]);
     }
     
     // Step 2: Apply a 3x3 Gaussian filter
@@ -385,11 +400,11 @@ int main(int argc, char **argv)
         
         // Launch the GPU version
         gettimeofday(&t[0], NULL);
-        // gpu_gaussian<<<grid, block>>>(bitmap.width, bitmap.height,
-        //                               d_image_out[0], d_image_out[1]);
+        gpu_gaussian<<<grid, block>>>(bitmap.width, bitmap.height,
+            d_image_out[0], d_image_out[1]);
         
-        // cudaMemcpy(image_out[1], d_image_out[1],
-        //            image_size * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(image_out[1], d_image_out[1],
+            image_size * sizeof(float), cudaMemcpyDeviceToHost);
         gettimeofday(&t[1], NULL);
         
         elapsed[1] = get_elapsed(t[0], t[1]);

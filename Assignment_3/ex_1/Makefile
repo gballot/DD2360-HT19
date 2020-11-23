@@ -5,6 +5,7 @@ EXEC:=hw3_ex1.out
 OBJ:=hw3_ex1.o
 
 PARAM:=images/hw3.bmp
+RES:=images/hw3_result_1.bmp images/hw3_result_2.bmp images/hw3_result_3.bmp
 
 ifeq (${STATION}, tegner)
 	ARCH:=sm_30
@@ -36,10 +37,13 @@ alloc:
 tags:
 	ctags --langmap=c++:+.cu *.cu
 
-display:
+${RES}: ${EXEC}
+	${MAKE} run
+
+res1: ${RES}
 	display -resize 1280x720 images/hw3_result_1.bmp
 
 clean:
 	${RM} *.o ${EXEC}
 
-.PHONY: all clean alloc run tags display
+.PHONY: all clean alloc run tags res1

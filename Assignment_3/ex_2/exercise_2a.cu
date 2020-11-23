@@ -99,8 +99,6 @@ void populateParticleArray(Particle *particles, int n) {
 // Entry point into the program, run each implementation of simulation and compare
 // the results
 int main(int argc, char **argv) {
-  char *file_path;
-  FILE *out_file = 0;
   bool usePinnedMemory = false;
 
   if (argc != 1 && argc != 2) {
@@ -137,7 +135,7 @@ int main(int argc, char **argv) {
 		// Round-up to the nearest multiple of BLOCK_SIZE that can hold at least
 		// NUM_PARTICLES threads
 		simulateParticlesKernel <<<(NUM_PARTICLES + BLOCK_SIZE - 1) / BLOCK_SIZE,
-			BLOCK_SIZE>>> (devParticles, field, NUM_PARTICLES, NUM_TIMESTEPS);
+			BLOCK_SIZE>>> (devParticles, field, NUM_PARTICLES);
 		
 		// Wait until all the threads on the GPU have finished before continuing
 		cudaDeviceSynchronize();

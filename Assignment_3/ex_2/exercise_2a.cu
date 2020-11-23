@@ -99,18 +99,18 @@ void populateParticleArray(Particle *particles, int n) {
 // Entry point into the program, run each implementation of simulation and compare
 // the results
 int main(int argc, char **argv) {
-  bool usePinnedMemory = false;
+ 	bool usePinnedMemory = false;
 	NUM_PARTICLES = 10000;
 
-  if (argc != 1 && argc != 2) {
-    printf("Usage: %s <num_particles>\n", argv[0]);
-    exit(-1);
-  } else {
-    NUM_PARTICLES = atoi(argv[1]);
-	if (argc == 3) {
-		usePinnedMemory = true;
+	if (argc != 1 && argc != 2) {
+    	printf("Usage: %s <num_particles>\n", argv[0]);
+    	exit(-1);
+	} else {
+    	NUM_PARTICLES = atoi(argv[1]);
+		if (argc == 3) {
+			usePinnedMemory = true;
+		}
 	}
-  }
 
 	// Allocate memory on the host
 	Particle *hostParticles;
@@ -155,6 +155,5 @@ int main(int argc, char **argv) {
 	}
 
 	cudaFree(devParticles);
-
 	return 0;
 }

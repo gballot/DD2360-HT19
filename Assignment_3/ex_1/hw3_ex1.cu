@@ -317,12 +317,35 @@ void cpu_sobel(int width, int height, float *image, float *image_out)
 /**
  * Calculates the gradient of an image using a Sobel filter on the GPU.
  */
-__global__ void gpu_sobel(int width, int height, float *image, float *image_out)
+__global__ void gpu_sobel(int width, int height, float *image,
+    float *image_out)
 {
   ////////////////
   // TO-DO #6.1 /////////////////////////////////////
   // Implement the GPU version of the Sobel filter //
   ///////////////////////////////////////////////////
+  float sobel_x[9] = { 1.0f,  0.0f, -1.0f,
+    2.0f,  0.0f, -2.0f,
+    1.0f,  0.0f, -1.0f };
+  float sobel_y[9] = { 1.0f,  2.0f,  1.0f,
+    0.0f,  0.0f,  0.0f,
+    -1.0f, -2.0f, -1.0f };
+
+  int index_x = blockIdx.x * blockDim.x + threadIdx.x;
+  int index_y = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (index_x < (width - 2) && index_y < (height - 2))
+  {
+    int offset_t = index_y * width + index_x;
+    int offset   = (index_y + 1) * width + (index_x + 1);
+
+    float gx = gpu_applyFilter(&image[offset_t], width, sobel_x, 3);
+    float gy = gpu_applyFilter(&image[offset_t], width, sobel_y, 3);
+
+    // Note: The output can be negative or exceed the max. color value
+    // of 255. We compensate this afterwards while storing the file.
+    image_out[offset] = sqrtf(gx * gx + gy * gy);
+  }
 }
 
 int main(int argc, char **argv)

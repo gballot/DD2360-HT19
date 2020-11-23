@@ -284,6 +284,17 @@ __global__ void gpu_gaussian(int width, int height, float *image,
 
   __shared__ float sh_block[BLOCK_SIZE_SH * BLOCK_SIZE_SH];
   sh_block[offset_sh] = image[offset_t];
+
+  // Copy block boundaries for convolution.
+  if (threadIdx.x < 2)
+    sh_block[offset_sh + BLOCK_SIZE] = image[offset_t + BLOCK_SIZE];
+  if (threadIdx.y < 2)
+    sh_block[offset_sh + BLOCK_SIZE * BLOCK_SIZE_SH]
+      = image[offset_t + BLOCK_SIZE * width];
+  if ((threadIdx.x < 2) && (threadIdx.y < 2))
+    sh_block[offset_sh + BLOCK_SIZE * (BLOCK_SIZE_SH + 1)]
+      = image[offset_t + BLOCK_SIZE * (width + 1)];
+
   __syncthreads();
 
   image_out[offset] = gpu_applyFilter(&sh_block[offset_sh],

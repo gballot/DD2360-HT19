@@ -43,7 +43,15 @@ ${RES}: ${EXEC}
 res1: ${RES}
 	display -resize 1280x720 images/hw3_result_1.bmp
 
+res2: ${RES}
+	montage -tile 2x1 -crop 320x180+512+512 -geometry 640x360 images/hw3_result_1.bmp images/hw3_result_2.bmp images/hw3_result_2_comp.jpg
+	display images/hw3_result_2_comp.jpg
+
+res3: ${RES}
+	montage -border 0 -geometry 640x360 -tile 3x1 images/hw3.bmp images/hw3_result_1.bmp images/hw3_result_3.bmp images/hw3_result_3_comp.jpg
+	display images/hw3_result_3_comp.jpg
+
 clean:
 	${RM} *.o ${EXEC}
 
-.PHONY: all clean alloc run tags res1
+.PHONY: all clean alloc run tags res1 res2 res3

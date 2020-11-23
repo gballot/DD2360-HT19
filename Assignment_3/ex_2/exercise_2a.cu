@@ -1,7 +1,7 @@
 #include <stdio.h>			// For use of the printf function
 #include <sys/time.h>		// For use of gettimeofday function
 
-#define NUM_TIMESTEPS 10000
+#define NUM_TIMESTEPS 1000
 #define ABS(a) ((a) < 0 ? -(a) : (a))
 #define DT 1
 
@@ -43,7 +43,6 @@ __host__ __device__ void updateVelocity(Particle *particle, float3 field) {
   particle->velocity.x = particle->velocity.x + field.x * DT;
   particle->velocity.y = particle->velocity.y + field.y * DT;
   particle->velocity.z = particle->velocity.z + field.z * DT;
-
 }
 
 /**
@@ -63,7 +62,6 @@ __global__ void simulateParticlesKernel(Particle *particles, float3 field,
 
 	// This thread has no work to do, exit
 	if (threadId > num_particles) return;
-
   // Get the right particle
   Particle *particle = particles + threadId;
 
@@ -101,8 +99,9 @@ void populateParticleArray(Particle *particles, int n) {
 int main(int argc, char **argv) {
  	bool usePinnedMemory = false;
 	NUM_PARTICLES = 10000;
+	BLOCK_SIZE = 256;
 
-	if (argc != 1 && argc != 2) {
+	if (argc != 1 && argc != 2 && argc != 3) {
     	printf("Usage: %s <num_particles>\n", argv[0]);
     	exit(-1);
 	} else {

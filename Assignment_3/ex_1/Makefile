@@ -31,9 +31,15 @@ run: ${EXEC}
 	${RUN} ./${EXEC} ${PARAM}
 
 alloc:
-	salloc -A edu20.DD2360 -t 0:05:00 --gres=gpu:K420:1 --nodes=1
+	salloc -A edu20.dd2360 -C Haswell -t 0:05:00 --gres=gpu:K420:1 --nodes=1
+
+tags:
+	ctags --langmap=c++:+.cu *.cu
+
+display:
+	display -resize 1280x720 images/hw3_result_1.bmp
 
 clean:
 	${RM} *.o ${EXEC}
 
-.PHONY: all clean alloc run
+.PHONY: all clean alloc run tags display

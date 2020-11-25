@@ -11,6 +11,7 @@
 #endif
 
 #define THRESHOLD 1e-3
+#define CSV
 
 /* CUDA layout */
 dim3 grid(1);
@@ -90,7 +91,11 @@ void cpu_sgemm(float *C, float *A, float *B, long size)
 
 	gettimeofday(&t1, NULL);
 
+#ifdef CSV
+	printf("%f,", elapsed(t0, t1));
+#else
 	printf("CPU matmul:\t\t\t%f ms\n", elapsed(t0, t1));
+#endif
 }
 
 /* matmul kernel with global memory */
@@ -121,7 +126,11 @@ void naive_sgemm(float *C, float *A, float *B, long size)
 	checkCudaErrors(cudaDeviceSynchronize());
 	gettimeofday(&t1, NULL);
 
+#ifdef CSV
+	printf("%f,", elapsed(t0, t1));
+#else
 	printf("GPU matmul (global memory):\t%f ms\n", elapsed(t0, t1));
+#endif
 }
 
 /* matmul kernel with shared memory */
@@ -146,8 +155,10 @@ void shared_sgemm_kernel(float *C, float *A, float *B, long size)
 			__syncthreads();
 	
 			/* TODO introduce a pragma directive that can potentially improve performance here */
+      #pragma omp parallel for
 			for (long k = 0; k < TILE_SIZE; ++k) {
 				/* TODO Perform multiplication here */
+        val += tile_A[threadIdx.y][k] * tile_B[k][threadIdx.x];
 			}
 			__syncthreads();
 		}
@@ -166,7 +177,11 @@ void shared_sgemm(float *C, float *A, float *B, long size)
 	checkCudaErrors(cudaDeviceSynchronize());
 	gettimeofday(&t1, NULL);
 
+#ifdef CSV
+	printf("%f\n", elapsed(t0, t1));
+#else
 	printf("GPU matmul (shared memory):\t%f ms\n", elapsed(t0, t1));
+#endif
 }
 
 /* cuBLAS */
@@ -187,7 +202,11 @@ void cublas_sgemm(float *C, float *A, float *B, long size)
 	gettimeofday(&t1, NULL);
 	cublasDestroy(handle);
 
+#ifdef CSV
+	printf("%f,", elapsed(t0, t1));
+#else
 	printf("GPU cuBLAS matmul:\t\t%f ms\n", elapsed(t0, t1));
+#endif
 }
 
 void print_usage(char *program)
@@ -212,7 +231,9 @@ int main(int argc, char *argv[])
 				break;
 			case 'v':
 				verify = true;
+#ifndef CSV
 				printf("Matrix size: %ldx%ld\n", size, size);
+#endif
 				break;
 			default:
 				print_usage(argv[0]);
@@ -222,10 +243,14 @@ int main(int argc, char *argv[])
 
 	grid = dim3(((size + (TILE_SIZE - 1)) / TILE_SIZE), ((size + (TILE_SIZE - 1)) / TILE_SIZE));
 
+#ifdef CSV
+  printf("%ld,%u,%u,%u,%d", size, grid.x, grid.y, TILE_SIZE, verify);
+#else
 	printf("Matrix size: %ldx%ld\n", size, size);
 	printf("Grid size: %ux%u\n", grid.x, grid.y);
 	printf("Tile size: %ux%u\n", TILE_SIZE, TILE_SIZE);
 	printf("Run CPU sgemm: %d\n\n", verify);
+#endif
 
 	float *A = (float*)malloc(sizeof(float)*size*size);
 	float *B = (float*)malloc(sizeof(float)*size*size);

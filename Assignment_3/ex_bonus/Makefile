@@ -31,6 +31,9 @@ ${EXEC}: ${OBJ}
 run: ${EXEC}
 	${RUN} ./${EXEC} ${PARAM}
 
+compare: ${EXEC}
+	sbatch ./run.sh
+
 alloc:
 	salloc -A edu20.dd2360 -C Haswell -t 0:05:00 --gres=gpu:K420:1 --nodes=1
 

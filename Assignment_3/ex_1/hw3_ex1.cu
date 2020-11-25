@@ -284,6 +284,17 @@ __global__ void gpu_gaussian(int width, int height, float *image,
 
   __shared__ float sh_block[BLOCK_SIZE_SH * BLOCK_SIZE_SH];
   sh_block[offset_sh] = image[offset_t];
+
+  // Copy block boundaries for convolution.
+  if (threadIdx.x < 2)
+    sh_block[offset_sh + BLOCK_SIZE] = image[offset_t + BLOCK_SIZE];
+  if (threadIdx.y < 2)
+    sh_block[offset_sh + BLOCK_SIZE * BLOCK_SIZE_SH]
+      = image[offset_t + BLOCK_SIZE * width];
+  if ((threadIdx.x < 2) && (threadIdx.y < 2))
+    sh_block[offset_sh + BLOCK_SIZE * (BLOCK_SIZE_SH + 1)]
+      = image[offset_t + BLOCK_SIZE * (width + 1)];
+
   __syncthreads();
 
   image_out[offset] = gpu_applyFilter(&sh_block[offset_sh],
@@ -410,7 +421,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    //cpu_grayscale(bitmap.width, bitmap.height, bitmap.data, image_out[0]);
+    cpu_grayscale(bitmap.width, bitmap.height, bitmap.data, image_out[0]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);
@@ -435,7 +446,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    //cpu_gaussian(bitmap.width, bitmap.height, image_out[0], image_out[1]);
+    cpu_gaussian(bitmap.width, bitmap.height, image_out[0], image_out[1]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);
@@ -460,7 +471,7 @@ int main(int argc, char **argv)
   {
     // Launch the CPU version
     gettimeofday(&t[0], NULL);
-    //cpu_sobel(bitmap.width, bitmap.height, image_out[1], image_out[0]);
+    cpu_sobel(bitmap.width, bitmap.height, image_out[1], image_out[0]);
     gettimeofday(&t[1], NULL);
 
     elapsed[0] = get_elapsed(t[0], t[1]);

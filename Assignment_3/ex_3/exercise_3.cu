@@ -102,13 +102,18 @@ void populateParticleArray(Particle *particles, int n) {
 // the results
 int main(int argc, char **argv) {
 
-	if (argc != 4) {
+	bool operationsByType = false;
+
+	if (argc != 4 && argc != 5) {
     	printf("Usage: %s <# particles> <# streams> <batch size>\n", argv[0]);
     	exit(-1);
 	} else {
     	NUM_PARTICLES = atoi(argv[1]);
 		NUM_STREAMS = atoi(argv[2]);
 		BATCH_SIZE = atoi(argv[3]);
+
+		if (argc == 5)
+			operationsByType = true;
 	}
 
 	int numBatches = NUM_PARTICLES / BATCH_SIZE;
@@ -128,6 +133,53 @@ int main(int argc, char **argv) {
 	// Create streams
 	cudaStream_t *streams = (cudaStream_t *) malloc(NUM_STREAMS * sizeof(cudaStream_t));
 
+	
+	// Invoke operations by type, not by stream
+	if (operationsByType) {
+	// After each timestep, copy particle results back to the CPU
+	int offset = 0;
+	
+	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
+		cudaStreamCreate(&streams[streamIndex]);
+	}
+
+	for (int timestep = 0; timestep < NUM_TIMESTEPS; timestep++) {
+		for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
+			for (int batch = 0; batch < numBatches; batch += NUM_STREAMS) {
+				offset = (batch + streamIndex) * BATCH_SIZE;
+
+				// Copy hostParticles onto the GPU
+				cudaMemcpyAsync(devParticles + offset, hostParticles + offset,
+					BATCH_SIZE * sizeof(Particle), cudaMemcpyHostToDevice,
+					streams[streamIndex]);
+			}
+
+			for (int batch = 0; batch < numBatches; batch += NUM_STREAMS) {
+				offset = (batch + streamIndex) * BATCH_SIZE;
+
+				// Round-up to the nearest multiple of BLOCK_SIZE that can hold at
+				// least NUM_PARTICLES threads
+				simulateParticlesKernel <<<
+					(BATCH_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE,
+					BLOCK_SIZE, 0, streams[streamIndex]>>> (
+					devParticles + offset, field, NUM_PARTICLES);
+			}
+
+			for (int batch = 0; batch < numBatches; batch += NUM_STREAMS) {
+				offset = (batch + streamIndex) * BATCH_SIZE;
+
+				// Copy the result of the simulation on the device back to
+				// the host into hostParticles
+				cudaMemcpyAsync(hostParticles + offset, devParticles + offset,
+					BATCH_SIZE * sizeof(Particle), cudaMemcpyDeviceToHost,
+					streams[streamIndex]);
+			}
+		}
+	}
+	}
+
+	// Invoke operations by stream, not by type
+	else {
 	// After each timestep, copy particle results back to the CPU
 	int offset = 0;
 	for (int streamIndex = 0; streamIndex < NUM_STREAMS; streamIndex++) {
@@ -156,6 +208,7 @@ int main(int argc, char **argv) {
 					streams[streamIndex]);
 			}
 		}
+	}
 	}
 
 	// Synchronize and free the streams

@@ -244,7 +244,8 @@ int main(int argc, char *argv[])
 	grid = dim3(((size + (TILE_SIZE - 1)) / TILE_SIZE), ((size + (TILE_SIZE - 1)) / TILE_SIZE));
 
 #ifdef CSV
-  printf("%ld,%u,%u,%u,%d", size, grid.x, grid.y, TILE_SIZE, verify);
+  verify = true;
+  printf("%ld,%u,%u,%u,", size, grid.x, grid.y, TILE_SIZE);
 #else
 	printf("Matrix size: %ldx%ld\n", size, size);
 	printf("Grid size: %ux%u\n", grid.x, grid.y);
